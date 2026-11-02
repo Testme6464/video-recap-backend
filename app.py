@@ -39,14 +39,17 @@ def download_audio(url, cookies_path=None):
         "-o", out_path,
         "--no-playlist",
         "--max-filesize", "500M",
-        # YouTube: use android client to avoid 429 rate limiting
-        "--extractor-args", "youtube:player_client=android,web",
         "--sleep-interval", "2",
         "--retries", "3",
         "--user-agent", "Mozilla/5.0 (Linux; Android 13; Redmi Note 12) AppleWebKit/537.36",
     ]
     if cookies_path:
+        # With cookies: use web client only (android doesn't support cookies)
+        cmd.extend(["--extractor-args", "youtube:player_client=web"])
         cmd.extend(["--cookies", cookies_path])
+    else:
+        # Without cookies: use android client to avoid 429
+        cmd.extend(["--extractor-args", "youtube:player_client=android,web"])
     cmd.append(url)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if not os.path.exists(out_path):
