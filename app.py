@@ -39,6 +39,11 @@ def download_audio(url):
         "-o", out_path,
         "--no-playlist",
         "--max-filesize", "500M",
+        # YouTube: use android client to avoid 429 rate limiting
+        "--extractor-args", "youtube:player_client=android,web",
+        "--sleep-interval", "2",
+        "--retries", "3",
+        "--user-agent", "Mozilla/5.0 (Linux; Android 13; Redmi Note 12) AppleWebKit/537.36",
         url
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
