@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import subprocess
 import os
@@ -150,6 +150,95 @@ def do_recap(audio_path):
             "bullets": bullets,
             "transcript": " ".join(s["text"] for s in segments)[:2000]
         })
+    except Exception as e:
+        print(f"Error: {e}", flush=True)
+        return jsonify({"error": str(e)[:500]}), 500
+
+@app.route('/recap-video', methods=['POST'])
+def recap_video():
+    """Create a video recap with key scenes. Accepts file upload."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        f = request.files['file']
+        if not f.filename:
+            return jsonify({"error": "Empty filename"}), 400
+        
+        ext = os.path.splitext(f.filename)[1] or '.mp4'
+        video_path = os.path.join(tmpdir, f"input{ext}")
+        f.save(video_path)
+        print(f"Uploaded to {video_path}", flush=True)
+        
+        # Transcribe to get segments with timestamps
+        print("Transcribing...", flush=True)
+        segments, lang = transcribe(video_path)
+        print(f"Transcribed {len(segments)} segments", flush=True)
+        
+        if not segments:
+            return jsonify({"error": "No speech found"}), 400
+        
+        # Score segments (same logic as bullets, but keep timestamps)
+        scored = []
+        n = len(segments)
+        for i, s in enumerate(segments):
+            txt = s["text"].strip()
+            if len(txt) < 15:
+                continue
+            score = len(txt)  # longer = more content
+            # Prefer middle segments (avoid intro/outro)
+            if n > 4 and (i < 2 or i > n - 3):
+                score *= 0.5
+            scored.append((score, s))
+        
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = [s for _, s in scored[:6]]  # top 6 scenes
+        top.sort(key=lambda s: s["start"])  # chronological order
+        
+        # Extract clips
+        clips = []
+        for i, s in enumerate(top):
+            start = max(0, s["start"] - 2)
+            duration = min(20, s["end"] - s["start"] + 4)
+            clip_path = os.path.join(tmpdir, f"clip_{i}.mp4")
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start),
+                "-t", str(duration),
+                "-i", video_path,
+                "-c", "copy",
+                "-avoid_negative_ts", "1",
+                clip_path
+            ]
+            subprocess.run(cmd, capture_output=True, timeout=60)
+            if os.path.exists(clip_path) and os.path.getsize(clip_path) > 1000:
+                clips.append(clip_path)
+        
+        if not clips:
+            return jsonify({"error": "Could not extract clips"}), 500
+        
+        # Concatenate
+        list_path = os.path.join(tmpdir, "list.txt")
+        with open(list_path, 'w') as lf:
+            for c in clips:
+                lf.write(f"file '{c}'\n")
+        
+        output_path = os.path.join(tmpdir, "recap.mp4")
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat", "-safe", "0",
+            "-i", list_path,
+            "-c", "copy",
+            output_path
+        ]
+        subprocess.run(cmd, capture_output=True, timeout=120)
+        
+        if not os.path.exists(output_path):
+            return jsonify({"error": "Failed to assemble video"}), 500
+        
+        print(f"Recap video ready: {output_path}", flush=True)
+        return send_file(output_path, mimetype='video/mp4', as_attachment=True, download_name='recap.mp4')
+    
     except Exception as e:
         print(f"Error: {e}", flush=True)
         return jsonify({"error": str(e)[:500]}), 500
