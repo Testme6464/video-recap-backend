@@ -27,7 +27,7 @@ def get_model():
         print("Model loaded!", flush=True)
     return _model
 
-def download_audio(url):
+def download_audio(url, cookies_path=None):
     """Download audio from URL using yt-dlp, return path to audio file."""
     tmpdir = tempfile.mkdtemp()
     out_path = os.path.join(tmpdir, f"{uuid.uuid4().hex}.m4a")
@@ -44,8 +44,10 @@ def download_audio(url):
         "--sleep-interval", "2",
         "--retries", "3",
         "--user-agent", "Mozilla/5.0 (Linux; Android 13; Redmi Note 12) AppleWebKit/537.36",
-        url
     ]
+    if cookies_path:
+        cmd.extend(["--cookies", cookies_path])
+    cmd.append(url)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if not os.path.exists(out_path):
         # Try without extension (yt-dlp may add it)
@@ -91,20 +93,40 @@ def extract_bullets(segments, max_bullets=7):
 
 @app.route('/recap', methods=['POST'])
 def recap():
+    # Support both JSON (url only) and multipart (url + cookies file)
+    tmpdir = tempfile.mkdtemp()
+    url = None
+    cookies_path = None
+    
     try:
-        data = request.get_json()
-        url = data.get('url', '').strip()
+        if request.is_json:
+            data = request.get_json()
+            url = data.get('url', '').strip()
+        else:
+            url = request.form.get('url', '').strip()
+            if 'cookies' in request.files:
+                cf = request.files['cookies']
+                if cf.filename:
+                    cookies_path = os.path.join(tmpdir, "cookies.txt")
+                    cf.save(cookies_path)
+                    print(f"Cookies saved", flush=True)
+        
         if not url:
             return jsonify({"error": "URL required"}), 400
         
         print(f"Downloading: {url}", flush=True)
-        audio_path = download_audio(url)
+        audio_path = download_audio(url, cookies_path)
         print(f"Downloaded to {audio_path}", flush=True)
         
         return do_recap(audio_path)
     except Exception as e:
         print(f"Error: {e}", flush=True)
         return jsonify({"error": str(e)[:500]}), 500
+    finally:
+        # Cleanup cookies
+        if cookies_path and os.path.exists(cookies_path):
+            try: os.remove(cookies_path)
+            except: pass
 
 @app.route('/recap-file', methods=['POST'])
 def recap_file():
