@@ -101,6 +101,36 @@ def recap():
         audio_path = download_audio(url)
         print(f"Downloaded to {audio_path}", flush=True)
         
+        return do_recap(audio_path)
+    except Exception as e:
+        print(f"Error: {e}", flush=True)
+        return jsonify({"error": str(e)[:500]}), 500
+
+@app.route('/recap-file', methods=['POST'])
+def recap_file():
+    """Accept direct file upload (bypasses YouTube blocking)."""
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        f = request.files['file']
+        if not f.filename:
+            return jsonify({"error": "Empty filename"}), 400
+        
+        tmpdir = tempfile.mkdtemp()
+        # Save with original extension
+        ext = os.path.splitext(f.filename)[1] or '.mp4'
+        audio_path = os.path.join(tmpdir, f"{uuid.uuid4().hex}{ext}")
+        f.save(audio_path)
+        print(f"Uploaded to {audio_path}", flush=True)
+        
+        return do_recap(audio_path)
+    except Exception as e:
+        print(f"Error: {e}", flush=True)
+        return jsonify({"error": str(e)[:500]}), 500
+
+def do_recap(audio_path):
+    """Transcribe and extract bullets from audio file."""
+    try:
         print("Transcribing...", flush=True)
         segments, lang = transcribe(audio_path)
         print(f"Transcribed {len(segments)} segments, lang={lang}", flush=True)
