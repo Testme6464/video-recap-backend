@@ -192,7 +192,10 @@ def recap_video():
             scored.append((score, s))
         
         scored.sort(key=lambda x: x[0], reverse=True)
-        top = [s for _, s in scored[:6]]  # top 6 scenes
+        # 6-10 scenes: take top 10, but at least 6 if available
+        num_scenes = min(10, len(scored))
+        num_scenes = max(6, num_scenes) if len(scored) >= 6 else len(scored)
+        top = [s for _, s in scored[:num_scenes]]
         top.sort(key=lambda s: s["start"])  # chronological order
         
         # Extract clips
